@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
+
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 MODULE_DESCRIPTION("Fibonacci engine driver");
@@ -27,16 +28,24 @@ static DEFINE_MUTEX(fib_mutex);
 static long long fib_sequence(long long k)
 {
     /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
+    if (k < 2)
+        return k;
 
-    f[0] = 0;
-    f[1] = 1;
+    long long a = 0, b = 1;
+    int len_zero = __builtin_clzll(k), counter = 64 - len_zero;
+    k <<= len_zero;
 
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+    for (; counter; k <<= 1, counter--) {
+        long long t1 = a * (2 * b - a);
+        long long t2 = b * b + a * a;
+        a = t1, b = t2;
+        if (k & 1ULL << 63) {
+            t1 = a + b;
+            a = b;
+            b = t1;
+        }
     }
-
-    return f[k];
+    return a;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
