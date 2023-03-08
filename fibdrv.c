@@ -6,7 +6,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-
+#include <linux/slab.h>
+#include <linux/string.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -18,7 +19,14 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+
+#define MAX_LENGTH 500
+
+typedef struct strbuf {
+    char fib[128];
+};
+
+
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
@@ -30,7 +38,6 @@ static long long fib_sequence(long long k)
     /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
     if (k < 2)
         return k;
-
     long long a = 0, b = 1;
     int len_zero = __builtin_clzll(k), counter = 64 - len_zero;
     k <<= len_zero;
@@ -47,6 +54,66 @@ static long long fib_sequence(long long k)
     }
     return a;
 }
+
+
+static void add_string(char *x, char *y, char *next)
+{
+    int x_size = strlen(x), y_size = strlen(y);
+    int i, carry = 0;
+    int sum;
+    if (x_size >= y_size) {
+        for (i = 0; i < y_size; i++) {
+            sum = (x[i] - '0') + (y[i] - '0') + carry;
+            next[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+        for (i = y_size; i < x_size; i++) {
+            sum = (x[i] - '0') + carry;
+            next[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+    } else {
+        for (i = 0; i < x_size; i++) {
+            sum = (x[i] - '0') + (y[i] - '0') + carry;
+            next[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+        for (i = x_size; i < y_size; i++) {
+            sum = (y[i] - '0') + carry;
+            next[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+    }
+    if (carry) {
+        next[i] = '1';
+    }
+    next[++i] = '\0';
+}
+
+void reverse_string(char *str, size_t size)
+{
+    for (int i = 0; i < size - i; i++) {
+        str[i] = str[i] ^ str[size - i];
+        str[size - i] = str[i] ^ str[size - i];
+        str[i] = str[i] ^ str[size - i];
+    }
+}
+
+static long long fib_sequence_string(long long k, char *buf)
+{
+    struct strbuf *res = kmalloc(sizeof(struct strbuf) * (k + 1), GFP_KERNEL);
+    strncpy(res[0].fib, "0", 2);
+    strncpy(res[1].fib, "1", 2);
+    for (int i = 2; i <= k; i++) {
+        add_string(res[i - 1].fib, res[i - 2].fib, res[i].fib);
+    }
+    size_t size = strlen(res[k].fib);
+    reverse_string(res[k].fib, size - 1);
+    __copy_to_user(buf, res[k].fib, size + 1);
+    return size;
+}
+
+
 
 static int fib_open(struct inode *inode, struct file *file)
 {
@@ -69,7 +136,7 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence_string(*offset, buf);
 }
 
 /* write operation is skipped */
